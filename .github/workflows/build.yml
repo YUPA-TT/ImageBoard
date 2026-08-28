@@ -5,6 +5,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+env:
+  HAS_APPLE_SIGNING: ${{ secrets.APPLE_CERTIFICATE_P12 != '' && secrets.APPLE_PROVISIONING_PROFILE != '' && secrets.APPLE_TEAM_ID != '' }}
+
 permissions:
   contents: read
 
@@ -31,11 +34,8 @@ jobs:
           xcodebuild -version
           xcodegen version
 
-      # The unsigned build is useful for TrollStore/jailbroken workflows.
-      # A normal iOS installation requires Apple code signing; the signed
-      # path below is enabled automatically when the required secrets exist.
       - name: Build unsigned iOS app
-        if: ${{ secrets.APPLE_CERTIFICATE_P12 == '' || secrets.APPLE_PROVISIONING_PROFILE == '' }}
+        if: ${{ env.HAS_APPLE_SIGNING != 'true' }}
         run: |
           xcodebuild \
             -project ImageBoard.xcodeproj \
@@ -49,7 +49,7 @@ jobs:
             clean build
 
       - name: Install Apple signing assets
-        if: ${{ secrets.APPLE_CERTIFICATE_P12 != '' && secrets.APPLE_PROVISIONING_PROFILE != '' }}
+        if: ${{ env.HAS_APPLE_SIGNING == 'true' }}
         env:
           CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
           CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -71,11 +71,14 @@ jobs:
           security default-keychain -s "$KEYCHAIN"
 
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-          UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin <<< "$(security cms -D -i "$PROFILE")")
+          UUID=$(security cms -D -i "$PROFILE" | /usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin)
           cp "$PROFILE" "$HOME/Library/MobileDevice/Provisioning Profiles/$UUID.mobileprovision"
 
       - name: Build signed iOS app
-        if: ${{ secrets.APPLE_CERTIFICATE_P12 != '' && secrets.APPLE_PROVISIONING_PROFILE != '' }}
+        if: ${{ env.HAS_APPLE_SIGNING == 'true' }}
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
           set -euo pipefail
           xcodebuild \
@@ -84,6 +87,9 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGN_IDENTITY="$IDENTITY" \
+            CODE_SIGN_STYLE=Manual \
             clean build
 
       - name: Package IPA
@@ -108,6 +114,13 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' artifact/Payload/ImageBoard.app/PlugIns/ImageBoardKeyboard.appex/Info.plist
           test -f artifact/Payload/ImageBoard.app/ImageBoard
           test -f artifact/Payload/ImageBoard.app/PlugIns/ImageBoardKeyboard.appex/ImageBoardKeyboard
+
+      - name: Verify code signatures when signed
+        if: ${{ env.HAS_APPLE_SIGNING == 'true' }}
+        run: |
+          set -euo pipefail
+          codesign --verify --deep --strict --verbose=2 artifact/Payload/ImageBoard.app
+          codesign -dv --verbose=4 artifact/Payload/ImageBoard.app 2>&1 | grep -E 'Identifier|TeamIdentifier|Authority'
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
