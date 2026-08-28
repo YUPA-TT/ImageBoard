@@ -100,11 +100,15 @@ jobs:
           test -n "$APP"
           ditto "$APP" artifact/Payload/ImageBoard.app
           cd artifact
-          ditto -c -k --norsrc Payload ../ImageBoard.ipa
+          # IMPORTANT: the IPA root must contain Payload/, not ImageBoard.app/.
+          zip -qry ../ImageBoard.ipa Payload
           cd ..
           unzip -t ImageBoard.ipa
+          test "$(unzip -Z1 ImageBoard.ipa | grep -c '^Payload/$')" -eq 1
           test "$(unzip -Z1 ImageBoard.ipa | grep -c '^Payload/ImageBoard.app/$')" -eq 1
           test "$(unzip -Z1 ImageBoard.ipa | grep -c '^Payload/ImageBoard.app/PlugIns/ImageBoardKeyboard.appex/')" -gt 0
+          # Reject the common broken form where Payload was omitted.
+          test "$(unzip -Z1 ImageBoard.ipa | grep -c '^ImageBoard.app/')" -eq 0
           ls -lh ImageBoard.ipa
 
       - name: Verify packaged IPA
@@ -116,12 +120,17 @@ jobs:
           APP=ipa-check/Payload/ImageBoard.app
           test -f "$APP/ImageBoard"
           test -f "$APP/Info.plist"
+          test -f "$APP/PkgInfo"
           test -f "$APP/PlugIns/ImageBoardKeyboard.appex/ImageBoardKeyboard"
           test -f "$APP/PlugIns/ImageBoardKeyboard.appex/Info.plist"
           /usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist" | grep -Fx 'ImageBoard'
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist" | grep -Fx 'com.yupa.imageboard'
           /usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/PlugIns/ImageBoardKeyboard.appex/Info.plist" | grep -Fx 'ImageBoardKeyboard'
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/PlugIns/ImageBoardKeyboard.appex/Info.plist" | grep -Fx 'com.yupa.imageboard.keyboard'
           /usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$APP/PlugIns/ImageBoardKeyboard.appex/Info.plist" | grep -Fx 'com.apple.keyboard-service'
-          echo 'IPA bundle structure verified.'
+          file "$APP/ImageBoard" | grep -E 'Mach-O.*arm64'
+          file "$APP/PlugIns/ImageBoardKeyboard.appex/ImageBoardKeyboard" | grep -E 'Mach-O.*arm64'
+          echo 'IPA bundle structure verified: Payload/ImageBoard.app/...'
 
       - name: Verify code signatures when signed
         if: ${{ env.HAS_APPLE_SIGNING == 'true' }}
