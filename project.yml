@@ -1,0 +1,34 @@
+name: ImageBoard
+options:
+  bundleIdPrefix: com.yupa
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+  developmentLanguage: ja
+settings:
+  base:
+    SWIFT_VERSION: 5.0
+    TARGETED_DEVICE_FAMILY: "1,2"
+targets:
+  ImageBoard:
+    type: application
+    platform: iOS
+    sources:
+      - path: ImageBoard
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.yupa.imageboard
+    dependencies:
+      - target: ImageBoardKeyboard
+  ImageBoardKeyboard:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ImageBoardKeyboard
+    resources:
+      - path: ImageBoardKeyboard/Resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.yupa.imageboard.keyboard
+        INFOPLIST_FILE: ImageBoardKeyboard/Info.plist
+        APPLICATION_EXTENSION_API_ONLY: YES
