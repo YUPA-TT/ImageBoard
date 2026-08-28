@@ -1,12 +1,19 @@
 import UIKit
 
 final class KeyboardViewController: UIInputViewController {
-    private enum Mode { case letters, numbers, kana }
+    private enum Mode { case kana, letters, numbers }
 
-    private var mode: Mode = .letters
+    private var mode: Mode = .kana
     private var shifted = false
     private var rootStack: UIStackView!
     private var backgroundImageView: UIImageView!
+
+    private let kanaRows = [
+        ["あ","か","さ","た","な","は","ま","や","ら","わ"],
+        ["゛","゜","、","。","「","」","ー","っ","ん"],
+        ["小","ABC","英数","backspace"],
+        ["123","globe","space","return"]
+    ]
 
     private let englishRows = [
         ["q","w","e","r","t","y","u","i","o","p"],
@@ -22,11 +29,17 @@ final class KeyboardViewController: UIInputViewController {
         ["ABC","globe","space","return"]
     ]
 
-    private let kanaRows = [
-        ["あ","か","さ","た","な","は","ま","や","ら","わ"],
-        ["゛","゜","、","。","「","」","ー","っ","ん"],
-        ["小","空白","英数","backspace"],
-        ["123","globe","space","return"]
+    private let flickMap: [String: [String]] = [
+        "あ": ["あ","い","う","え","お"],
+        "か": ["か","き","く","け","こ"],
+        "さ": ["さ","し","す","せ","そ"],
+        "た": ["た","ち","つ","て","と"],
+        "な": ["な","に","ぬ","ね","の"],
+        "は": ["は","ひ","ふ","へ","ほ"],
+        "ま": ["ま","み","む","め","も"],
+        "や": ["や","（","ゆ","）","よ"],
+        "ら": ["ら","り","る","れ","ろ"],
+        "わ": ["わ","を","ん","ー","〜"]
     ]
 
     override func viewDidLoad() {
@@ -73,9 +86,9 @@ final class KeyboardViewController: UIInputViewController {
         rootStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let rows: [[String]]
         switch mode {
+        case .kana: rows = kanaRows
         case .letters: rows = englishRows
         case .numbers: rows = numberRows
-        case .kana: rows = kanaRows
         }
 
         for row in rows {
@@ -86,14 +99,14 @@ final class KeyboardViewController: UIInputViewController {
             for key in row {
                 let button = KeyboardKeyButton(type: .system)
                 button.key = key
+                button.flickOptions = flickMap[key]
                 button.setTitle(displayTitle(for: key), for: .normal)
-                button.titleLabel?.font = .systemFont(ofSize: key == "space" ? 15 : 20, weight: .regular)
+                button.titleLabel?.font = .systemFont(ofSize: key == "space" ? 15 : 20)
                 button.setTitleColor(.label, for: .normal)
                 button.backgroundColor = UIColor.secondarySystemBackground.withAlphaComponent(0.96)
                 button.layer.cornerRadius = 5
                 button.layer.masksToBounds = true
                 button.addTarget(self, action: #selector(keyPressed(_:)), for: .touchUpInside)
-                button.addTarget(self, action: #selector(keyTouchDown(_:)), for: .touchDown)
                 rowView.addArrangedSubview(button)
             }
             rootStack.addArrangedSubview(rowView)
@@ -102,26 +115,22 @@ final class KeyboardViewController: UIInputViewController {
 
     private func displayTitle(for key: String) -> String {
         switch key {
-        case "shift": return shifted ? "⇧" : "⇧"
+        case "shift": return "⇧"
         case "backspace": return "⌫"
         case "globe": return "🌐"
         case "return": return "↵"
         case "space": return "空白"
-        case "ABC": return "ABC"
-        case "123": return "123"
-        case "#+=": return "#+="
         default:
             if mode == .letters && shifted { return key.uppercased() }
             return key
         }
     }
 
-    @objc private func keyTouchDown(_ sender: KeyboardKeyButton) {
-        if sender.key == "space" { sender.setTitle("space", for: .normal) }
-    }
-
     @objc private func keyPressed(_ sender: KeyboardKeyButton) {
         guard let key = sender.key else { return }
+        let input = sender.flickedKey ?? key
+        sender.flickedKey = nil
+
         switch key {
         case "backspace": textDocumentProxy.deleteBackward()
         case "return": textDocumentProxy.insertText("\n")
@@ -139,14 +148,12 @@ final class KeyboardViewController: UIInputViewController {
         case "英数":
             mode = .letters
             rebuildKeyboard()
+        case "#+=": break
         case "空白": textDocumentProxy.insertText(" ")
-        case "小":
-            textDocumentProxy.insertText("っ")
-        case "゛", "゜", "、", "。", "「", "」", "ー":
-            textDocumentProxy.insertText(key)
+        case "小": textDocumentProxy.insertText("っ")
         default:
-            textDocumentProxy.insertText(mode == .letters && shifted ? key.uppercased() : key)
-            if shifted { shifted = false; rebuildKeyboard() }
+            textDocumentProxy.insertText(mode == .letters && shifted ? input.uppercased() : input)
+            if mode == .letters && shifted { shifted = false; rebuildKeyboard() }
         }
     }
 
@@ -156,4 +163,32 @@ final class KeyboardViewController: UIInputViewController {
 
 final class KeyboardKeyButton: UIButton {
     var key: String?
+    var flickOptions: [String]?
+    var flickedKey: String?
+    private var touchStart: CGPoint?
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesBegan(touches, with: event)
+        touchStart = touches.first?.location(in: self)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if let options = flickOptions, options.count == 5,
+           let start = touchStart, let end = touches.first?.location(in: self) {
+            let dx = end.x - start.x
+            let dy = end.y - start.y
+            let threshold: CGFloat = 18
+            if max(abs(dx), abs(dy)) >= threshold {
+                if abs(dx) > abs(dy) {
+                    flickedKey = dx > 0 ? options[3] : options[1]
+                } else {
+                    flickedKey = dy > 0 ? options[2] : options[4]
+                }
+            } else {
+                flickedKey = options[0]
+            }
+        }
+        touchStart = nil
+        super.touchesEnded(touches, with: event)
+    }
 }
