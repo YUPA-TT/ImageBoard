@@ -37,16 +37,7 @@ jobs:
       - name: Build unsigned iOS app
         if: ${{ env.HAS_APPLE_SIGNING != 'true' }}
         run: |
-          xcodebuild \
-            -project ImageBoard.xcodeproj \
-            -scheme ImageBoard \
-            -configuration Release \
-            -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            clean build
+          xcodebuild -project ImageBoard.xcodeproj -scheme ImageBoard -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" clean build
 
       - name: Install Apple signing assets
         if: ${{ env.HAS_APPLE_SIGNING == 'true' }}
@@ -59,17 +50,14 @@ jobs:
           KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
           CERT="$RUNNER_TEMP/signing.p12"
           PROFILE="$RUNNER_TEMP/profile.mobileprovision"
-
           printf '%s' "$CERTIFICATE_P12" | base64 --decode > "$CERT"
           printf '%s' "$PROVISIONING_PROFILE" | base64 --decode > "$PROFILE"
-
           security create-keychain -p runner "$KEYCHAIN"
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
           security unlock-keychain -p runner "$KEYCHAIN"
           security import "$CERT" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
           security list-keychains -d user -s "$KEYCHAIN"
           security default-keychain -s "$KEYCHAIN"
-
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
           UUID=$(security cms -D -i "$PROFILE" | /usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin)
           cp "$PROFILE" "$HOME/Library/MobileDevice/Provisioning Profiles/$UUID.mobileprovision"
@@ -81,46 +69,66 @@ jobs:
           IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
           set -euo pipefail
-          xcodebuild \
-            -project ImageBoard.xcodeproj \
-            -scheme ImageBoard \
-            -configuration Release \
-            -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            DEVELOPMENT_TEAM="$TEAM_ID" \
-            CODE_SIGN_IDENTITY="$IDENTITY" \
-            CODE_SIGN_STYLE=Manual \
-            clean build
+          xcodebuild -project ImageBoard.xcodeproj -scheme ImageBoard -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_IDENTITY="$IDENTITY" CODE_SIGN_STYLE=Manual clean build
+
+      - name: Validate built bundle before packaging
+        run: |
+          set -euo pipefail
+          APP=$(find "$HOME/Library/Developer/Xcode/DerivedData" -path '*/Build/Products/Release-iphoneos/ImageBoard.app' -print -quit)
+          test -n "$APP"
+          test -f "$APP/ImageBoard"
+          test -f "$APP/Info.plist"
+          test -d "$APP/PlugIns/ImageBoardKeyboard.appex"
+          test -f "$APP/PlugIns/ImageBoardKeyboard.appex/ImageBoardKeyboard"
+          test -f "$APP/PlugIns/ImageBoardKeyboard.appex/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist" | grep -Fx 'ImageBoard'
+          /usr/libexec/PlistBuddy -c 'Print :CFBundlePackageType' "$APP/Info.plist" | grep -Fx 'APPL'
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/PlugIns/ImageBoardKeyboard.appex/Info.plist" | grep -Fx 'ImageBoardKeyboard'
+          /usr/libexec/PlistBuddy -c 'Print :CFBundlePackageType' "$APP/PlugIns/ImageBoardKeyboard.appex/Info.plist" | grep -Fx 'XPC!'
+          /usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$APP/PlugIns/ImageBoardKeyboard.appex/Info.plist" | grep -Fx 'com.apple.keyboard-service'
+          plutil -lint "$APP/Info.plist"
+          plutil -lint "$APP/PlugIns/ImageBoardKeyboard.appex/Info.plist"
+          echo "Built app: $APP"
+          du -sh "$APP"
 
       - name: Package IPA
         run: |
           set -euo pipefail
-          rm -rf artifact
+          rm -rf artifact ImageBoard.ipa
           mkdir -p artifact/Payload
           APP=$(find "$HOME/Library/Developer/Xcode/DerivedData" -path '*/Build/Products/Release-iphoneos/ImageBoard.app' -print -quit)
           test -n "$APP"
-          test -d "$APP/PlugIns/ImageBoardKeyboard.appex"
-          cp -R "$APP" artifact/Payload/ImageBoard.app
+          ditto "$APP" artifact/Payload/ImageBoard.app
           cd artifact
-          zip -qry ../ImageBoard.ipa Payload
+          ditto -c -k --norsrc Payload ../ImageBoard.ipa
           cd ..
+          unzip -t ImageBoard.ipa
+          test "$(unzip -Z1 ImageBoard.ipa | grep -c '^Payload/ImageBoard.app/$')" -eq 1
+          test "$(unzip -Z1 ImageBoard.ipa | grep -c '^Payload/ImageBoard.app/PlugIns/ImageBoardKeyboard.appex/')" -gt 0
           ls -lh ImageBoard.ipa
 
-      - name: Verify bundle structure
+      - name: Verify packaged IPA
         run: |
           set -euo pipefail
-          unzip -l ImageBoard.ipa
-          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' artifact/Payload/ImageBoard.app/Info.plist
-          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' artifact/Payload/ImageBoard.app/PlugIns/ImageBoardKeyboard.appex/Info.plist
-          test -f artifact/Payload/ImageBoard.app/ImageBoard
-          test -f artifact/Payload/ImageBoard.app/PlugIns/ImageBoardKeyboard.appex/ImageBoardKeyboard
+          rm -rf ipa-check
+          mkdir ipa-check
+          unzip -q ImageBoard.ipa -d ipa-check
+          APP=ipa-check/Payload/ImageBoard.app
+          test -f "$APP/ImageBoard"
+          test -f "$APP/Info.plist"
+          test -f "$APP/PlugIns/ImageBoardKeyboard.appex/ImageBoardKeyboard"
+          test -f "$APP/PlugIns/ImageBoardKeyboard.appex/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist" | grep -Fx 'ImageBoard'
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/PlugIns/ImageBoardKeyboard.appex/Info.plist" | grep -Fx 'ImageBoardKeyboard'
+          /usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$APP/PlugIns/ImageBoardKeyboard.appex/Info.plist" | grep -Fx 'com.apple.keyboard-service'
+          echo 'IPA bundle structure verified.'
 
       - name: Verify code signatures when signed
         if: ${{ env.HAS_APPLE_SIGNING == 'true' }}
         run: |
           set -euo pipefail
-          codesign --verify --deep --strict --verbose=2 artifact/Payload/ImageBoard.app
-          codesign -dv --verbose=4 artifact/Payload/ImageBoard.app 2>&1 | grep -E 'Identifier|TeamIdentifier|Authority'
+          codesign --verify --deep --strict --verbose=2 ipa-check/Payload/ImageBoard.app
+          codesign -dv --verbose=4 ipa-check/Payload/ImageBoard.app 2>&1 | grep -E 'Identifier|TeamIdentifier|Authority'
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
