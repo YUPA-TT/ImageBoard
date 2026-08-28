@@ -19,6 +19,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.yupa.imageboard
         INFOPLIST_FILE: ImageBoard/Info.plist
+        INFOPLIST_KEY_CFBundlePackageType: APPL
     dependencies:
       - target: ImageBoardKeyboard
   ImageBoardKeyboard:
@@ -32,4 +33,5 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.yupa.imageboard.keyboard
         INFOPLIST_FILE: ImageBoardKeyboard/Info.plist
+        INFOPLIST_KEY_CFBundlePackageType: XPC!
         APPLICATION_EXTENSION_API_ONLY: YES
