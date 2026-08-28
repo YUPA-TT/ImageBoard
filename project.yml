@@ -18,6 +18,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.yupa.imageboard
+        INFOPLIST_FILE: ImageBoard/Info.plist
     dependencies:
       - target: ImageBoardKeyboard
   ImageBoardKeyboard:
